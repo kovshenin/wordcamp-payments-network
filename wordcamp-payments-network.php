@@ -11,7 +11,7 @@
 
 class WordCamp_Payments_Network_Tools {
 	public static $list_table;
-	public static $db_version = 3;
+	public static $db_version = 4;
 
 	/**
 	 * Runs during plugins_loaded, doh.
@@ -26,6 +26,10 @@ class WordCamp_Payments_Network_Tools {
 		add_action( 'wordcamp_payments_aggregate', array( __CLASS__, 'aggregate' ) );
 		add_action( 'network_admin_menu', array( __CLASS__, 'network_admin_menu' ) );
 		add_action( 'init', array( __CLASS__, 'upgrade' ) );
+
+		// Diff-based updates to the index.
+		add_action( 'save_post', array( __CLASS__, 'save_post' ) );
+		add_action( 'delete_post', array( __CLASS__, 'delete_post' ) );
 
 		if ( ! empty( $_GET['wcp-debug-network'] ) && current_user_can( 'manage_network' ) )
 			add_action( 'admin_init', function() { do_action( 'wordcamp_payments_aggregate' ); }, 99 );
@@ -66,7 +70,7 @@ class WordCamp_Payments_Network_Tools {
 			due int(11) unsigned NOT NULL default '0',
 			status varchar(255) NOT NULL default '',
 			PRIMARY KEY  (id),
-			KEY blog_id (blog_id),
+			KEY blog_post_id (blog_id, post_id),
 			KEY due (due),
 			KEY status (status)
 		) %s;", self::get_table_name(), $charset_collate );
@@ -104,23 +108,69 @@ class WordCamp_Payments_Network_Tools {
 				'posts_per_page' => 20,
 			) ) ) {
 				foreach ( $requests as $request ) {
-					$terms = wp_get_object_terms( $request->ID, 'wcp_payment_category' );
-					$category_name = ! empty( $terms ) ? array_shift( $terms )->name : '';
-
-					$wpdb->insert( self::get_table_name(), array(
-						'blog_id' => $blog_id,
-						'post_id' => $request->ID,
-						'created' => get_post_time( 'U', true, $request->ID ),
-						'due' => absint( get_post_meta( $request->ID, '_camppayments_due_by', true ) ),
-						'status' => $request->post_status,
-						'method' => get_post_meta( $request->ID, '_camppayments_payment_method', true ),
-						'category' => $category_name,
-					) );
+					$wpdb->insert( self::get_table_name(), self::prepare_for_index( $request ) );
 				}
 			}
 
 			restore_current_blog();
 		}
+	}
+
+	/**
+	 * Given a $request (could be a post_id) create an array that can
+	 * be used with $wpdb->update() or $wpdb->insert() to add or update
+	 * an index entry.
+	 */
+	public static function prepare_for_index( $request ) {
+		$request = get_post( $request );
+
+		$terms = wp_get_object_terms( $request->ID, 'wcp_payment_category' );
+		$category_name = ! empty( $terms ) ? array_shift( $terms )->name : '';
+
+		return array(
+			'blog_id' => get_current_blog_id(),
+			'post_id' => $request->ID,
+			'created' => get_post_time( 'U', true, $request->ID ),
+			'due' => absint( get_post_meta( $request->ID, '_camppayments_due_by', true ) ),
+			'status' => $request->post_status,
+			'method' => get_post_meta( $request->ID, '_camppayments_payment_method', true ),
+			'category' => $category_name,
+		);
+	}
+
+	/**
+	 * Runs during save_post, make sure our index is up to date.
+	 */
+	public static function save_post( $post_id ) {
+		global $wpdb;
+
+		$request = get_post( $post_id );
+		if ( 'wcp_payment_request' != $request->post_type )
+			return;
+
+		$table_name = self::get_table_name();
+		$entry_id = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table_name} WHERE `blog_id` = %d AND `post_id` = %d LIMIT 1;", get_current_blog_id(), $request->ID ) );
+
+		// Insert or update this record.
+		if ( empty( $entry_id ) ) {
+			$wpdb->insert( $table_name, self::prepare_for_index( $request ) );
+		} else {
+			$wpdb->update( $table_name, self::prepare_for_index( $request ), array( 'id' => $entry_id ) );
+		}
+	}
+
+	/**
+	 * Delete an index query when a request post has been deleted.
+	 */
+	public static function delete_post( $post_id ) {
+		global $wpdb;
+
+		$request = get_post( $post_id );
+		if ( 'wcp_payment_request' != $request->post_type )
+			return;
+
+		$table_name = self::get_table_name();
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$table_name} WHERE `blog_id` = %d AND `post_id` = %d LIMIT 1;", get_current_blog_id(), $request->ID ) );
 	}
 
 	/**
