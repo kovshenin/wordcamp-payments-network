@@ -81,11 +81,11 @@ class WordCamp_Payments_Network_List_Table extends WP_List_Table {
 		$order = 'desc';
 
 		if ( 'overdue' == $this->view ) {
-			$where .= $wpdb->prepare( " AND `status` = 'pending' AND `due` <= %d ", time() );
+			$where .= $wpdb->prepare( " AND `status` = 'unpaid' AND `due` <= %d ", time() );
 			$orderby = 'due';
 			$order = 'asc';
 		} elseif ( 'pending' == $this->view ) {
-			$where .= " AND `status` = 'pending' ";
+			$where .= " AND `status` = 'unpaid' ";
 		}
 
 		if ( ! empty( $_REQUEST['orderby'] ) && in_array( $_REQUEST['orderby'], array_values( $this->get_sortable_columns() ) ) )
