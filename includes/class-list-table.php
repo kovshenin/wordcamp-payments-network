@@ -149,7 +149,7 @@ class WordCamp_Payments_Network_List_Table extends WP_List_Table {
 	 * Note: runs in a switch_to_blog() context.
 	 */
 	public function column_category( $request ) {
-		$terms = wp_get_object_terms( $request->ID, 'payment-category' );
+		$terms = wp_get_object_terms( $request->ID, 'wcp_payment_category' );
 		if ( empty( $terms ) )
 			return;
 

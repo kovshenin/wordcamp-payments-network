@@ -104,7 +104,7 @@ class WordCamp_Payments_Network_Tools {
 				'posts_per_page' => 20,
 			) ) ) {
 				foreach ( $requests as $request ) {
-					$terms = wp_get_object_terms( $request->ID, 'payment-category' );
+					$terms = wp_get_object_terms( $request->ID, 'wcp_payment_category' );
 					$category_name = ! empty( $terms ) ? array_shift( $terms )->name : '';
 
 					$wpdb->insert( self::get_table_name(), array(
