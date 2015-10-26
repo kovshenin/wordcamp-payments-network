@@ -40,16 +40,6 @@ class WordCamp_Payments_Network_List_Table extends WP_List_Table {
 	}
 
 	/**
-	 * This list table can display multiple views which are
-	 * essentially just filters. Use this method to set the appropriate view.
-	 */
-	public function set_view( $view ) {
-		$this->view = 'overview';
-		if ( in_array( $view, array( 'overview', 'pending', 'overdue' ) ) )
-			$this->view = $view;
-	}
-
-	/**
 	 * Outputs inline CSS to be used with the list table.
 	 */
 	public function print_inline_css() {
@@ -73,19 +63,24 @@ class WordCamp_Payments_Network_List_Table extends WP_List_Table {
 		global $wpdb;
 
 		$sql = sprintf( "SELECT SQL_CALC_FOUND_ROWS blog_id, post_id FROM `%s` WHERE 1=1 ", WordCamp_Payments_Network_Tools::get_table_name() );
+		$view = WordCamp_Payments_Network_Tools::get_current_tab();
 		$where = '';
 		$orderby = '';
 		$limit = '';
 
-		$orderby = 'created';
-		$order = 'desc';
+		$orderby = 'due';
+		$order = 'asc';
 
-		if ( 'overdue' == $this->view ) {
-			$where .= $wpdb->prepare( " AND `status` = 'unpaid' AND `due` <= %d ", time() );
-			$orderby = 'due';
-			$order = 'asc';
-		} elseif ( 'pending' == $this->view ) {
+		if ( 'overdue' == $view ) {
+			$where .= $wpdb->prepare( " AND `status` = 'unpaid' AND `due` > 0 AND `due` <= %d ", time() );
+		} elseif ( 'pending' == $view ) {
 			$where .= " AND `status` = 'unpaid' ";
+		} elseif ( 'paid' == $view ) {
+			$where .= " AND `status` = 'paid' ";
+			$orderby = 'created';
+			$order = 'desc';
+		} elseif( 'incomplete' == $view ) {
+			$where .= " AND `status` = 'incomplete' ";
 		}
 
 		if ( ! empty( $_REQUEST['orderby'] ) && in_array( $_REQUEST['orderby'], array_values( $this->get_sortable_columns() ) ) )
@@ -157,11 +152,11 @@ class WordCamp_Payments_Network_List_Table extends WP_List_Table {
 	 * Note: runs in a switch_to_blog() context.
 	 */
 	public function column_category( $request ) {
-		$terms = wp_get_object_terms( $request->ID, 'wcp_payment_category' );
-		if ( empty( $terms ) )
-			return;
+		require_once( WP_PLUGIN_DIR . '/wordcamp-payments/classes/payment-request.php' );
+		$categories        = WCP_Payment_Request::get_payment_categories();
+		$selected_category = get_post_meta( $request->ID, '_camppayments_payment_category', true );
 
-		return array_shift( $terms )->name;
+		return isset( $categories[ $selected_category ] ) ? $categories[ $selected_category ] : '';
 	}
 
 	/**

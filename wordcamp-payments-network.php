@@ -87,6 +87,10 @@ class WordCamp_Payments_Network_Tools {
 	public static function aggregate() {
 		global $wpdb;
 
+		// Register the custom payment statuses so that we can filter posts to include only them, in order to exclude trashed posts
+		require_once( WP_PLUGIN_DIR . '/wordcamp-payments/classes/payment-request.php' );
+		WCP_Payment_Request::register_post_statuses();
+
 		// Truncate existing table.
 		$wpdb->query( sprintf( "TRUNCATE TABLE %s;", self::get_table_name() ) );
 
@@ -94,16 +98,10 @@ class WordCamp_Payments_Network_Tools {
 		foreach ( $blogs as $blog_id ) {
 			switch_to_blog( $blog_id );
 
-			// Skip sites where WordCamp Payments is not active.
-			if ( ! in_array( 'wordcamp-payments/bootstrap.php', (array) apply_filters( 'active_plugins', get_option( 'active_plugins' ) ) ) ) {
-				restore_current_blog();
-				continue;
-			}
-
 			$paged = 1;
 			while ( $requests = get_posts( array(
 				'paged' => $paged++,
-				'post_status' => 'any',
+				'post_status' => array( 'paid', 'unpaid', 'incomplete' ),
 				'post_type' => 'wcp_payment_request',
 				'posts_per_page' => 20,
 			) ) ) {
@@ -124,9 +122,6 @@ class WordCamp_Payments_Network_Tools {
 	public static function prepare_for_index( $request ) {
 		$request = get_post( $request );
 
-		$terms = wp_get_object_terms( $request->ID, 'wcp_payment_category' );
-		$category_name = ! empty( $terms ) ? array_shift( $terms )->name : '';
-
 		return array(
 			'blog_id' => get_current_blog_id(),
 			'post_id' => $request->ID,
@@ -134,7 +129,7 @@ class WordCamp_Payments_Network_Tools {
 			'due' => absint( get_post_meta( $request->ID, '_camppayments_due_by', true ) ),
 			'status' => $request->post_status,
 			'method' => get_post_meta( $request->ID, '_camppayments_payment_method', true ),
-			'category' => $category_name,
+			'category' => get_post_meta( $request->ID, '_camppayments_payment_category', true ),
 		);
 	}
 
@@ -188,7 +183,7 @@ class WordCamp_Payments_Network_Tools {
 		?>
 		<div class="wrap">
 			<?php screen_icon( 'tools' ); ?>
-			<h2>WordCamp Payments Dashboard</h2>
+			<h1>WordCamp Payments Dashboard</h1>
 			<?php settings_errors(); ?>
 			<h3 class="nav-tab-wrapper"><?php self::render_dashboard_tabs(); ?></h3>
 
@@ -198,7 +193,7 @@ class WordCamp_Payments_Network_Tools {
 				<?php self::$list_table->prepare_items(); ?>
 				<form id="posts-filter" action="" method="get">
 					<input type="hidden" name="page" value="wcp-dashboard" />
-					<input type="hidden" name="wcp-section" value="overview" />
+					<input type="hidden" name="wcp-section" value="overdue" />
 					<?php self::$list_table->display(); ?>
 				</form>
 
@@ -213,17 +208,19 @@ class WordCamp_Payments_Network_Tools {
 		require_once( __DIR__ . '/includes/class-list-table.php' );
 
 		self::$list_table = new WordCamp_Payments_Network_List_Table;
-		self::$list_table->set_view( self::get_current_tab() );
 	}
 
 	/**
 	 * Returns the current active tab in the UI.
 	 */
 	public static function get_current_tab() {
-		if ( isset( $_REQUEST['wcp-section'] ) )
-			return strtolower( $_REQUEST['wcp-section'] );
+		$tab = 'overdue';
 
-		return 'overview';
+		if ( isset( $_REQUEST['wcp-section'] ) && in_array( $_REQUEST['wcp-section'], array( 'pending', 'overdue', 'paid', 'incomplete' ) ) ) {
+			$tab = $_REQUEST['wcp-section'];
+		}
+
+		return $tab;
 	}
 
 	/**
@@ -232,9 +229,10 @@ class WordCamp_Payments_Network_Tools {
 	public static function render_dashboard_tabs() {
 		$current_section = self::get_current_tab();
 		$sections = array(
-			'overview' => 'Overview',
 			'overdue' => 'Overdue',
 			'pending' => 'Pending',
+			'paid'    => 'Paid',
+			'incomplete' => __( 'Incomplete', 'wordcamporg' ),
 		);
 
 		foreach ( $sections as $section_key => $section_caption ) {
